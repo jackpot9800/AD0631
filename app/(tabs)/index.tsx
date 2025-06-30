@@ -11,10 +11,9 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Monitor, Play, Star, Clock, WifiOff, CircleAlert as AlertCircle, RefreshCw, Settings, Radio } from 'lucide-react-native';
+import { Monitor, Play, Star, Clock, WifiOff, CircleAlert as AlertCircle, RefreshCw, Settings } from 'lucide-react-native';
 import { apiService, Presentation } from '@/services/ApiService';
 import { statusService } from '@/services/StatusService';
-import { initWebSocketService, getWebSocketService } from '@/services/WebSocketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Définition des types
@@ -41,7 +40,6 @@ export default function HomeScreen() {
   const [defaultPresentation, setDefaultPresentation] = useState<DefaultPresentation | null>(null);
   const [recentPresentations, setRecentPresentations] = useState<Presentation[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [webSocketStatus, setWebSocketStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -63,19 +61,6 @@ export default function HomeScreen() {
       await loadDefaultPresentation();
       await loadRecentPresentations();
       
-      // Initialiser le service WebSocket si activé
-      const webSocketEnabled = await AsyncStorage.getItem('websocket_enabled');
-      if (webSocketEnabled !== 'false') {
-        try {
-          setWebSocketStatus('connecting');
-          await initWebSocketService();
-          setWebSocketStatus('connected');
-        } catch (error) {
-          console.error('Error initializing WebSocket service:', error);
-          setWebSocketStatus('disconnected');
-        }
-      }
-      
       setLoading(false);
     };
 
@@ -90,18 +75,6 @@ export default function HomeScreen() {
       apiService.stopAssignmentCheck();
       apiService.stopDefaultPresentationCheck();
     };
-  }, []);
-  
-  // Vérifier périodiquement le statut WebSocket
-  useEffect(() => {
-    const checkWebSocketStatus = setInterval(() => {
-      const wsService = getWebSocketService();
-      if (wsService) {
-        setWebSocketStatus(wsService.isConnectedToServer() ? 'connected' : 'disconnected');
-      }
-    }, 5000);
-    
-    return () => clearInterval(checkWebSocketStatus);
   }, []);
 
   const checkConnection = async () => {
@@ -221,12 +194,6 @@ export default function HomeScreen() {
       await loadAssignedPresentation();
       await loadDefaultPresentation();
       await loadRecentPresentations();
-      
-      // Vérifier le statut WebSocket
-      const wsService = getWebSocketService();
-      if (wsService) {
-        setWebSocketStatus(wsService.isConnectedToServer() ? 'connected' : 'disconnected');
-      }
     } catch (error) {
       console.error('Error refreshing data:', error);
       setError(error instanceof Error ? error.message : 'Erreur lors de l\'actualisation');
@@ -290,7 +257,7 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>Kiosque de Présentations</Text>
-          <Text style={styles.subtitle}>Fire TV Enhanced</Text>
+          <Text style={styles.subtitle}>Fire TV Enhanced - Optimisé pour la stabilité</Text>
           
           <View style={styles.statusContainer}>
             <View style={styles.statusItem}>
@@ -299,10 +266,8 @@ export default function HomeScreen() {
             </View>
             
             <View style={styles.statusItem}>
-              <View style={[styles.statusDot, { backgroundColor: webSocketStatus === 'connected' ? '#10b981' : '#6b7280' }]} />
-              <Text style={styles.statusText}>
-                WebSocket {webSocketStatus === 'connected' ? 'connecté' : 'déconnecté'}
-              </Text>
+              <View style={[styles.statusDot, { backgroundColor: '#10b981' }]} />
+              <Text style={styles.statusText}>Mode HTTP stable</Text>
             </View>
           </View>
         </View>
@@ -471,67 +436,43 @@ export default function HomeScreen() {
         </View>
         
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Contrôle à distance</Text>
+          <Text style={styles.sectionTitle}>Optimisations activées</Text>
           
-          <View style={styles.remoteControlCard}>
-            <View style={styles.remoteControlHeader}>
-              <Radio size={20} color={webSocketStatus === 'connected' ? "#10b981" : "#6b7280"} />
-              <Text style={styles.remoteControlTitle}>
-                WebSocket {webSocketStatus === 'connected' ? 'connecté' : 'déconnecté'}
+          <View style={styles.optimizationCard}>
+            <View style={styles.optimizationHeader}>
+              <Monitor size={20} color="#10b981" />
+              <Text style={styles.optimizationTitle}>
+                Mode stabilité activé
               </Text>
             </View>
             
-            <Text style={styles.remoteControlDescription}>
-              {webSocketStatus === 'connected' 
-                ? "Votre appareil est connecté au serveur WebSocket et peut recevoir des commandes en temps réel."
-                : "Votre appareil n'est pas connecté au serveur WebSocket. Les commandes à distance utiliseront le mode HTTP."}
+            <Text style={styles.optimizationDescription}>
+              L'application est configurée en mode stabilité optimale pour les présentations en boucle.
+              Le mode WebSocket est désactivé pour garantir une meilleure fiabilité.
             </Text>
             
-            <TouchableOpacity 
-              style={[
-                styles.remoteControlButton,
-                webSocketStatus === 'connected' ? styles.remoteControlButtonConnected : styles.remoteControlButtonDisconnected
-              ]}
-              onPress={async () => {
-                if (webSocketStatus !== 'connected') {
-                  try {
-                    setWebSocketStatus('connecting');
-                    await initWebSocketService();
-                    setWebSocketStatus('connected');
-                    Alert.alert(
-                      'WebSocket connecté',
-                      'Connexion au serveur WebSocket établie avec succès.',
-                      [{ text: 'OK' }]
-                    );
-                  } catch (error) {
-                    console.error('Error connecting to WebSocket server:', error);
-                    setWebSocketStatus('disconnected');
-                    Alert.alert(
-                      'Erreur de connexion',
-                      'Impossible de se connecter au serveur WebSocket.',
-                      [{ text: 'OK' }]
-                    );
-                  }
-                } else {
-                  const wsService = getWebSocketService();
-                  if (wsService) {
-                    wsService.disconnect();
-                    setWebSocketStatus('disconnected');
-                    Alert.alert(
-                      'WebSocket déconnecté',
-                      'Déconnexion du serveur WebSocket effectuée.',
-                      [{ text: 'OK' }]
-                    );
-                  }
-                }
-              }}
-            >
-              <Text style={styles.remoteControlButtonText}>
-                {webSocketStatus === 'connected' 
-                  ? 'Déconnecter' 
-                  : (webSocketStatus === 'connecting' ? 'Connexion...' : 'Connecter')}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.optimizationFeatures}>
+              <View style={styles.optimizationFeature}>
+                <View style={styles.featureIcon}>
+                  <RefreshCw size={16} color="#ffffff" />
+                </View>
+                <Text style={styles.featureText}>Boucles optimisées</Text>
+              </View>
+              
+              <View style={styles.optimizationFeature}>
+                <View style={styles.featureIcon}>
+                  <Clock size={16} color="#ffffff" />
+                </View>
+                <Text style={styles.featureText}>Keep-awake renforcé</Text>
+              </View>
+              
+              <View style={styles.optimizationFeature}>
+                <View style={[styles.featureIcon, {backgroundColor: '#ef4444'}]}>
+                  <AlertCircle size={16} color="#ffffff" />
+                </View>
+                <Text style={styles.featureText}>Auto-récupération</Text>
+              </View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -864,42 +805,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  remoteControlCard: {
+  optimizationCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
     padding: 16,
   },
-  remoteControlHeader: {
+  optimizationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
   },
-  remoteControlTitle: {
+  optimizationTitle: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#ffffff',
     marginLeft: 8,
   },
-  remoteControlDescription: {
+  optimizationDescription: {
     fontSize: 14,
     color: '#9ca3af',
     marginBottom: 16,
     lineHeight: 20,
   },
-  remoteControlButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+  optimizationFeatures: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  optimizationFeature: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#262626',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
-  remoteControlButtonConnected: {
-    backgroundColor: '#ef4444',
-  },
-  remoteControlButtonDisconnected: {
+  featureIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#10b981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
-  remoteControlButtonText: {
+  featureText: {
     color: '#ffffff',
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
