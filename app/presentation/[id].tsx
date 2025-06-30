@@ -69,6 +69,7 @@ export default function PresentationScreen() {
   const stabilityCheckRef = useRef<NodeJS.Timeout | null>(null);
   const errorRecoveryAttempts = useRef<number>(0);
   const maxErrorRecoveryAttempts = 3;
+  const slideChangeDelayRef = useRef<number>(500); // Délai entre les changements de slide
 
   // Nettoyage complet des ressources
   const cleanupResources = useCallback(() => {
@@ -430,8 +431,6 @@ export default function PresentationScreen() {
 
     if (isPlaying && presentation && presentation.slides.length > 0) {
       startSlideTimer();
-      // Précharger les prochaines images
-      preloadNextImages(currentSlideIndex);
     } else {
       stopSlideTimer();
     }
@@ -630,6 +629,9 @@ export default function PresentationScreen() {
       console.log(`Moving to slide ${nextIndex + 1}`);
       setCurrentSlideIndex(nextIndex);
       lastSlideChangeRef.current = Date.now();
+      
+      // Précharger les prochaines images
+      preloadNextImages(nextIndex);
     } else {
       console.log('End of presentation reached');
       
@@ -684,8 +686,8 @@ export default function PresentationScreen() {
     // Délai pour éviter les changements trop rapides
     setTimeout(() => {
       slideChangeInProgressRef.current = false;
-    }, 500);
-  }, [presentation, currentSlideIndex, isLooping, isPlaying, assigned, loopCount]);
+    }, slideChangeDelayRef.current);
+  }, [presentation, currentSlideIndex, isLooping, isPlaying, assigned, loopCount, preloadNextImages]);
 
   const previousSlide = useCallback(() => {
     if (currentSlideIndex > 0 && !slideChangeInProgressRef.current) {
@@ -696,7 +698,7 @@ export default function PresentationScreen() {
       
       setTimeout(() => {
         slideChangeInProgressRef.current = false;
-      }, 500);
+      }, slideChangeDelayRef.current);
     }
     setShowControls(true);
   }, [currentSlideIndex]);
@@ -711,7 +713,7 @@ export default function PresentationScreen() {
       
       setTimeout(() => {
         slideChangeInProgressRef.current = false;
-      }, 500);
+      }, slideChangeDelayRef.current);
     }
   }, [presentation]);
 
@@ -725,6 +727,7 @@ export default function PresentationScreen() {
     setImageLoadError({});
     setSlidesPreloaded({});
     lastSlideChangeRef.current = Date.now();
+    errorRecoveryAttempts.current = 0;
   }, []);
 
   const toggleControls = useCallback(() => {
