@@ -67,6 +67,8 @@ export default function PresentationScreen() {
   const keepScreenAwakeRef = useRef<NodeJS.Timeout | null>(null);
   const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stabilityCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const errorRecoveryAttempts = useRef<number>(0);
+  const maxErrorRecoveryAttempts = 3;
 
   // Nettoyage complet des ressources
   const cleanupResources = useCallback(() => {
@@ -120,7 +122,7 @@ export default function PresentationScreen() {
       clearInterval(keepScreenAwakeRef.current);
     }
     
-    // Réactiver le mode anti-veille toutes les 30 secondes
+    // Réactiver le mode anti-veille toutes les 15 secondes (plus fréquent pour plus de fiabilité)
     keepScreenAwakeRef.current = setInterval(() => {
       if (Platform.OS !== 'web') {
         console.log('Refreshing keep awake mode to prevent screen timeout');
@@ -128,9 +130,17 @@ export default function PresentationScreen() {
           activateKeepAwake();
         } catch (error) {
           console.log('Error refreshing keep awake:', error);
+          // Réessayer après une courte pause
+          setTimeout(() => {
+            try {
+              activateKeepAwake();
+            } catch (e) {
+              console.log('Second attempt to refresh keep awake failed:', e);
+            }
+          }, 1000);
         }
       }
-    }, 30000);
+    }, 15000); // Toutes les 15 secondes pour plus de fiabilité
   }, []);
 
   // Surveillance de la stabilité
@@ -148,6 +158,7 @@ export default function PresentationScreen() {
         console.warn('=== STABILITY ISSUE DETECTED ===');
         console.warn('No slide change for 2 minutes, restarting presentation');
         restartPresentation();
+        return;
       }
       
       // Vérifier si on est bloqué sur une slide
@@ -155,14 +166,30 @@ export default function PresentationScreen() {
         const currentSlide = presentation.slides[currentSlideIndex];
         const expectedDuration = currentSlide.duration * 1000;
         
+        // Si la slide est affichée depuis beaucoup plus longtemps que prévu
         if (timeSinceLastChange > expectedDuration + 10000) { // 10s de marge
           console.warn('=== SLIDE STUCK DETECTED ===');
-          console.warn(`Slide ${currentSlideIndex + 1} stuck, forcing next slide`);
+          console.warn(`Slide ${currentSlideIndex + 1} stuck for ${Math.floor(timeSinceLastChange/1000)}s, expected ${currentSlide.duration}s`);
+          console.warn('Forcing next slide');
+          
+          // Forcer le passage à la slide suivante
+          stopSlideTimer();
           nextSlide();
         }
       }
-    }, 30000); // Vérifier toutes les 30 secondes
-  }, [isPlaying, presentation, currentSlideIndex]);
+      
+      // Vérifier si on est à la fin de la présentation en mode boucle mais bloqué
+      if (isPlaying && isLooping && presentation && 
+          currentSlideIndex === presentation.slides.length - 1 && 
+          timeSinceLastChange > presentation.slides[currentSlideIndex].duration * 1000 + 15000) {
+        console.warn('=== LOOP STUCK DETECTED ===');
+        console.warn('Presentation stuck at last slide, forcing restart');
+        setCurrentSlideIndex(0);
+        setLoopCount(prev => prev + 1);
+        lastSlideChangeRef.current = Date.now();
+      }
+    }, 20000); // Vérifier toutes les 20 secondes
+  }, [isPlaying, isLooping, presentation, currentSlideIndex, restartPresentation, nextSlide, stopSlideTimer]);
 
   useEffect(() => {
     // Activer le mode anti-veille spécifiquement pour cette page
@@ -191,7 +218,7 @@ export default function PresentationScreen() {
     // Démarrer la surveillance de stabilité
     startStabilityMonitoring();
     
-    // Configurer le callback pour les commandes à distance (sans WebSocket)
+    // Configurer le callback pour les commandes à distance
     statusService.setOnRemoteCommand(handleRemoteCommand);
     
     return () => {
@@ -394,36 +421,6 @@ export default function PresentationScreen() {
     }
   }, [presentation, auto_play]);
 
-  // Préchargement intelligent des images
-  const preloadNextImages = useCallback((currentIndex: number) => {
-    if (!presentation || !presentation.slides) return;
-    
-    // Précharger les 2 prochaines images
-    const imagesToPreload = [];
-    for (let i = 1; i <= 2; i++) {
-      const nextIndex = (currentIndex + i) % presentation.slides.length;
-      const slide = presentation.slides[nextIndex];
-      if (slide && !slidesPreloaded[slide.id]) {
-        imagesToPreload.push(slide);
-      }
-    }
-    
-    imagesToPreload.forEach((slide) => {
-      if (preloadTimeoutRef.current) {
-        clearTimeout(preloadTimeoutRef.current);
-      }
-      
-      preloadTimeoutRef.current = setTimeout(() => {
-        Image.prefetch(slide.image_url).then(() => {
-          setSlidesPreloaded(prev => ({ ...prev, [slide.id]: true }));
-          console.log(`Preloaded slide ${slide.id}`);
-        }).catch((error) => {
-          console.warn(`Failed to preload slide ${slide.id}:`, error);
-        });
-      }, 500); // Délai pour éviter de surcharger
-    });
-  }, [presentation, slidesPreloaded]);
-
   // Gestion du timer de slide optimisée avec prévention des fuites mémoire
   useEffect(() => {
     console.log('=== TIMER EFFECT TRIGGERED ===');
@@ -518,6 +515,36 @@ export default function PresentationScreen() {
       setLoading(false);
     }
   };
+
+  // Préchargement intelligent des images
+  const preloadNextImages = useCallback((currentIndex: number) => {
+    if (!presentation || !presentation.slides) return;
+    
+    // Précharger les 2 prochaines images
+    const imagesToPreload = [];
+    for (let i = 1; i <= 2; i++) {
+      const nextIndex = (currentIndex + i) % presentation.slides.length;
+      const slide = presentation.slides[nextIndex];
+      if (slide && !slidesPreloaded[slide.id]) {
+        imagesToPreload.push(slide);
+      }
+    }
+    
+    imagesToPreload.forEach((slide) => {
+      if (preloadTimeoutRef.current) {
+        clearTimeout(preloadTimeoutRef.current);
+      }
+      
+      preloadTimeoutRef.current = setTimeout(() => {
+        Image.prefetch(slide.image_url).then(() => {
+          setSlidesPreloaded(prev => ({ ...prev, [slide.id]: true }));
+          console.log(`Preloaded slide ${slide.id}`);
+        }).catch((error) => {
+          console.warn(`Failed to preload slide ${slide.id}:`, error);
+        });
+      }, 500); // Délai pour éviter de surcharger
+    });
+  }, [presentation, slidesPreloaded]);
 
   const stopSlideTimer = useCallback(() => {
     if (intervalRef.current) {
@@ -714,12 +741,29 @@ export default function PresentationScreen() {
   const handleImageError = useCallback((slideId: number) => {
     console.error('Image load error for slide:', slideId);
     setImageLoadError(prev => ({ ...prev, [slideId]: true }));
-  }, []);
+    
+    // Tentative de récupération automatique en cas d'erreur d'image
+    errorRecoveryAttempts.current += 1;
+    
+    if (errorRecoveryAttempts.current <= maxErrorRecoveryAttempts) {
+      console.log(`Attempting recovery (${errorRecoveryAttempts.current}/${maxErrorRecoveryAttempts})`);
+      
+      // Attendre un peu puis passer à la slide suivante
+      setTimeout(() => {
+        if (isPlaying && presentation && presentation.slides.length > 1) {
+          nextSlide();
+        }
+      }, 2000);
+    } else {
+      console.log('Max recovery attempts reached, continuing with error display');
+    }
+  }, [isPlaying, presentation, nextSlide]);
 
   const retryLoadPresentation = useCallback(() => {
     setError(null);
     setImageLoadError({});
     setSlidesPreloaded({});
+    errorRecoveryAttempts.current = 0;
     loadPresentation();
   }, []);
 
@@ -1211,6 +1255,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  assignedText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   autoPlayIndicator: {
     position: 'absolute',
     top: 70,
@@ -1222,6 +1271,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  autoPlayText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   controlsOverlay: {
     position: 'absolute',
