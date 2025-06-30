@@ -7,11 +7,18 @@ const config = getDefaultConfig(__dirname, {
   isCSSEnabled: true,
 });
 
-// Add support for TypeScript files
-config.resolver.sourceExts.push('ts', 'tsx');
+// Ajout du support pour les fichiers TypeScript
+config.resolver.sourceExts = ['jsx', 'js', 'ts', 'tsx', 'json'];
 
-// Add support for all file extensions supported by Expo
+// Assurez-vous que les extensions d'assets sont correctement configurées
 config.resolver.assetExts = config.resolver.assetExts || [];
-config.resolver.sourceExts = config.resolver.sourceExts || [];
+
+// Optimisations pour la stabilité
+config.maxWorkers = 2;
+config.resetCache = false;
+config.transformer.minifierConfig = {
+  keep_classnames: true,
+  keep_fnames: true,
+};
 
 module.exports = config;

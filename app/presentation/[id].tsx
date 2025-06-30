@@ -70,6 +70,7 @@ export default function PresentationScreen() {
   const errorRecoveryAttempts = useRef<number>(0);
   const maxErrorRecoveryAttempts = 3;
   const slideChangeDelayRef = useRef<number>(500); // Délai entre les changements de slide
+  const stuckDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Nettoyage complet des ressources
   const cleanupResources = useCallback(() => {
@@ -101,6 +102,11 @@ export default function PresentationScreen() {
       stabilityCheckRef.current = null;
     }
     
+    if (stuckDetectionTimeoutRef.current) {
+      clearTimeout(stuckDetectionTimeoutRef.current);
+      stuckDetectionTimeoutRef.current = null;
+    }
+    
     // Désactiver le gestionnaire TV
     if (tvEventHandlerRef.current) {
       try {
@@ -115,33 +121,6 @@ export default function PresentationScreen() {
     setImageLoadError({});
     setSlidesPreloaded({});
     slideChangeInProgressRef.current = false;
-  }, []);
-
-  // Fonction pour maintenir l'écran allumé de manière plus robuste
-  const startKeepAwakeTimer = useCallback(() => {
-    if (keepScreenAwakeRef.current) {
-      clearInterval(keepScreenAwakeRef.current);
-    }
-    
-    // Réactiver le mode anti-veille toutes les 15 secondes (plus fréquent pour plus de fiabilité)
-    keepScreenAwakeRef.current = setInterval(() => {
-      if (Platform.OS !== 'web') {
-        console.log('Refreshing keep awake mode to prevent screen timeout');
-        try {
-          activateKeepAwake();
-        } catch (error) {
-          console.log('Error refreshing keep awake:', error);
-          // Réessayer après une courte pause
-          setTimeout(() => {
-            try {
-              activateKeepAwake();
-            } catch (e) {
-              console.log('Second attempt to refresh keep awake failed:', e);
-            }
-          }, 1000);
-        }
-      }
-    }, 15000); // Toutes les 15 secondes pour plus de fiabilité
   }, []);
 
   // Surveillance de la stabilité
@@ -191,6 +170,33 @@ export default function PresentationScreen() {
       }
     }, 20000); // Vérifier toutes les 20 secondes
   }, [isPlaying, isLooping, presentation, currentSlideIndex, restartPresentation, nextSlide, stopSlideTimer]);
+
+  // Fonction pour maintenir l'écran allumé de manière plus robuste
+  const startKeepAwakeTimer = useCallback(() => {
+    if (keepScreenAwakeRef.current) {
+      clearInterval(keepScreenAwakeRef.current);
+    }
+    
+    // Réactiver le mode anti-veille toutes les 15 secondes (plus fréquent pour plus de fiabilité)
+    keepScreenAwakeRef.current = setInterval(() => {
+      if (Platform.OS !== 'web') {
+        console.log('Refreshing keep awake mode to prevent screen timeout');
+        try {
+          activateKeepAwake();
+        } catch (error) {
+          console.log('Error refreshing keep awake:', error);
+          // Réessayer après une courte pause
+          setTimeout(() => {
+            try {
+              activateKeepAwake();
+            } catch (e) {
+              console.log('Second attempt to refresh keep awake failed:', e);
+            }
+          }, 1000);
+        }
+      }
+    }, 15000); // Toutes les 15 secondes pour plus de fiabilité
+  }, []);
 
   useEffect(() => {
     // Activer le mode anti-veille spécifiquement pour cette page
@@ -431,8 +437,35 @@ export default function PresentationScreen() {
 
     if (isPlaying && presentation && presentation.slides.length > 0) {
       startSlideTimer();
+      
+      // Configurer un timer de détection de blocage
+      if (stuckDetectionTimeoutRef.current) {
+        clearTimeout(stuckDetectionTimeoutRef.current);
+      }
+      
+      const currentSlide = presentation.slides[currentSlideIndex];
+      const slideDuration = currentSlide.duration * 1000;
+      
+      // Définir un timeout qui se déclenche si la slide ne change pas après sa durée + 5s
+      stuckDetectionTimeoutRef.current = setTimeout(() => {
+        console.warn('=== SLIDE CHANGE TIMEOUT TRIGGERED ===');
+        console.warn(`Slide ${currentSlideIndex + 1} did not change after ${currentSlide.duration + 5}s`);
+        
+        // Vérifier si on est toujours sur la même slide
+        if (isPlaying && presentation && currentSlideIndex === currentSlideIndex) {
+          console.warn('Forcing slide change due to timeout');
+          stopSlideTimer();
+          nextSlide();
+        }
+      }, slideDuration + 5000); // Durée de la slide + 5 secondes de marge
+      
     } else {
       stopSlideTimer();
+      
+      if (stuckDetectionTimeoutRef.current) {
+        clearTimeout(stuckDetectionTimeoutRef.current);
+        stuckDetectionTimeoutRef.current = null;
+      }
     }
 
     return () => {
@@ -440,6 +473,11 @@ export default function PresentationScreen() {
         console.log('=== CLEANING TIMER FROM EFFECT ===');
         clearInterval(intervalRef.current);
         intervalRef.current = null;
+      }
+      
+      if (stuckDetectionTimeoutRef.current) {
+        clearTimeout(stuckDetectionTimeoutRef.current);
+        stuckDetectionTimeoutRef.current = null;
       }
     };
   }, [isPlaying, currentSlideIndex, presentation]);

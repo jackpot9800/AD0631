@@ -48,6 +48,7 @@ class StatusService {
   private maxHeartbeatFailCount: number = 5;
   private heartbeatRetryDelay: number = 5000;
   private lastHeartbeatSuccess: number = 0;
+  private stabilityCheckInterval: NodeJS.Timeout | null = null;
 
   async initialize() {
     console.log('=== INITIALIZING STATUS SERVICE (HTTP ONLY) ===');
@@ -65,6 +66,9 @@ class StatusService {
     
     // Vérifier les commandes à distance toutes les 15 secondes (HTTP seulement)
     this.startCommandCheck();
+    
+    // Démarrer la vérification de stabilité
+    this.startStabilityCheck();
     
     // Tenter de récupérer l'adresse IP locale
     this.getLocalIPAddress();
@@ -162,6 +166,32 @@ class StatusService {
         console.log('Command check failed:', error);
       }
     }, 15000); // Toutes les 15 secondes pour plus de réactivité
+  }
+
+  /**
+   * Démarre la vérification de stabilité
+   */
+  private startStabilityCheck() {
+    if (this.stabilityCheckInterval) return;
+
+    this.stabilityCheckInterval = setInterval(() => {
+      // Vérifier si le statut est cohérent
+      if (this.currentStatus) {
+        const now = Date.now();
+        const lastHeartbeatTime = this.lastHeartbeatSuccess;
+        
+        // Si aucun heartbeat réussi depuis plus de 2 minutes et que le statut est "online"
+        if (now - lastHeartbeatTime > 120000 && this.currentStatus.status === 'online') {
+          console.log('=== STABILITY CHECK: Status inconsistency detected ===');
+          // Forcer une mise à jour du statut
+          this.updateStatus({ status: 'online' });
+          // Forcer un heartbeat
+          this.sendHeartbeat().catch(error => {
+            console.log('Forced heartbeat failed:', error);
+          });
+        }
+      }
+    }, 60000); // Vérifier toutes les minutes
   }
 
   /**
@@ -447,6 +477,11 @@ class StatusService {
     if (this.commandCheckInterval) {
       clearInterval(this.commandCheckInterval);
       this.commandCheckInterval = null;
+    }
+    
+    if (this.stabilityCheckInterval) {
+      clearInterval(this.stabilityCheckInterval);
+      this.stabilityCheckInterval = null;
     }
 
     this.updateStatus({ status: 'offline' });
