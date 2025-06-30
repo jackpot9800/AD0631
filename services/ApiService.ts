@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   ASSIGNED_PRESENTATION: 'assigned_presentation',
   DEFAULT_PRESENTATION: 'default_presentation',
   DEVICE_NAME: 'device_name',
+  AUTO_START_ENABLED: 'auto_start_enabled',
 };
 
 export interface Presentation {
@@ -91,12 +92,12 @@ class ApiService {
   private onDefaultPresentationCallback: ((presentation: DefaultPresentation) => void) | null = null;
   private assignmentCheckEnabled: boolean = false;
   private defaultCheckEnabled: boolean = false;
-  private apiType: 'standard' | 'affichageDynamique' = 'affichageDynamique'; // Par défaut affichageDynamique
+  private apiType: 'standard' | 'affichageDynamique' = 'affichageDynamique';
   private lastConnectionError: string = '';
   private connectionAttempts: number = 0;
-  private directFetchMode: boolean = false; // Mode fetch direct pour contourner les problèmes
   private localIpAddress: string | null = null;
   private externalIpAddress: string | null = null;
+  private autoStartEnabled: boolean = false;
 
   async initialize() {
     try {
@@ -107,6 +108,7 @@ class ApiService {
       const savedRegistration = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_REGISTERED);
       const savedToken = await AsyncStorage.getItem(STORAGE_KEYS.ENROLLMENT_TOKEN);
       const savedDeviceName = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_NAME);
+      const savedAutoStart = await AsyncStorage.getItem(STORAGE_KEYS.AUTO_START_ENABLED);
       
       if (savedUrl) {
         this.baseUrl = savedUrl;
@@ -141,6 +143,11 @@ class ApiService {
         console.log('Loaded enrollment token');
       }
 
+      if (savedAutoStart === 'true') {
+        this.autoStartEnabled = true;
+        console.log('Auto-start is enabled');
+      }
+
       // Tenter de récupérer l'adresse IP locale
       await this.getLocalIPAddress();
       
@@ -153,8 +160,7 @@ class ApiService {
       console.log('Device Name:', this.deviceName);
       console.log('Is Registered:', this.isRegistered);
       console.log('API Type:', this.apiType);
-      console.log('Local IP:', this.localIpAddress);
-      console.log('External IP:', this.externalIpAddress);
+      console.log('Auto Start:', this.autoStartEnabled);
       
     } catch (error) {
       console.error('Error initializing API service:', error);
@@ -688,6 +694,16 @@ class ApiService {
     return this.lastConnectionError;
   }
 
+  async setAutoStartEnabled(enabled: boolean): Promise<void> {
+    this.autoStartEnabled = enabled;
+    await AsyncStorage.setItem(STORAGE_KEYS.AUTO_START_ENABLED, enabled ? 'true' : 'false');
+    console.log('Auto-start setting updated:', enabled);
+  }
+
+  isAutoStartEnabled(): boolean {
+    return this.autoStartEnabled;
+  }
+
   /**
    * Obtient l'URL de base du serveur pour les images
    */
@@ -1075,7 +1091,9 @@ class ApiService {
           'presentation_mode',
           'fullscreen',
           'auto_play',
-          'loop_mode'
+          'loop_mode',
+          'keep_awake',
+          'auto_start'
         ]
       };
 
@@ -1303,6 +1321,7 @@ class ApiService {
     connectionAttempts: number;
     localIpAddress: string | null;
     externalIpAddress: string | null;
+    autoStartEnabled: boolean;
   }> {
     return {
       serverUrl: this.baseUrl,
@@ -1318,7 +1337,8 @@ class ApiService {
       lastConnectionError: this.lastConnectionError,
       connectionAttempts: this.connectionAttempts,
       localIpAddress: this.localIpAddress,
-      externalIpAddress: this.externalIpAddress
+      externalIpAddress: this.externalIpAddress,
+      autoStartEnabled: this.autoStartEnabled
     };
   }
 
@@ -1335,11 +1355,13 @@ class ApiService {
     this.apiType = 'affichageDynamique';
     this.lastConnectionError = '';
     this.connectionAttempts = 0;
+    this.autoStartEnabled = false;
     
     await AsyncStorage.removeItem(STORAGE_KEYS.DEVICE_REGISTERED);
     await AsyncStorage.removeItem(STORAGE_KEYS.ENROLLMENT_TOKEN);
     await AsyncStorage.removeItem(STORAGE_KEYS.ASSIGNED_PRESENTATION);
     await AsyncStorage.removeItem(STORAGE_KEYS.DEFAULT_PRESENTATION);
+    await AsyncStorage.removeItem(STORAGE_KEYS.AUTO_START_ENABLED);
     
     console.log('Device reset complete');
   }
